@@ -685,6 +685,11 @@ th, td {
     font-size: 0.9rem;
 }
 
+.star-rating { white-space: nowrap; letter-spacing: 0.05em; }
+.star-full  { color: #e8a020; }
+.star-half  { color: #e8a020; opacity: 0.4; }
+.star-empty { color: #ccc; }
+
 th {
     font-weight: 600;
     background: var(--surface-alt);

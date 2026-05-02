@@ -11,7 +11,7 @@ from pyspark.sql.functions import col
 from pyspark.sql.types import IntegerType
 
 from pyspark.ml import Pipeline
-from pyspark.ml.feature import StringIndexer, VectorAssembler, Normalizer,\
+from pyspark.ml.feature import VectorAssembler, Normalizer,\
                                Word2VecModel, Imputer
 from pyspark.ml.stat import Summarizer
 
@@ -437,7 +437,7 @@ class Recommendation(User):
                 lambda duration: f'{int(duration//60)}m {int(duration%60)}s' if duration else 'N/A')
 
         # Index the informative columns, depending on the level of detail required
-        output_feats = ['name','address','city','review_count', 'stars']
+        output_feats = ['name','address','city','stars', 'review_count']
         if detail: output_feats = output_feats + ['categories']
 
         # Also index trip duration if applicable

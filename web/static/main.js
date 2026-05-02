@@ -80,7 +80,7 @@ function renderResults(data) {
     body.innerHTML = '';
 
     // Build header based on options
-    let headerHTML = '<th>Name</th><th>City</th><th>Reviews</th><th>Stars</th>';
+    let headerHTML = '<th>Name</th><th>City</th><th>Stars</th><th>Reviews</th>';
     if (data.trip_duration) headerHTML += '<th>Trip</th>';
     if (data.detail) headerHTML += '<th>Categories</th>';
     header.innerHTML = headerHTML;
@@ -94,8 +94,8 @@ function renderResults(data) {
         tr.setAttribute('data-business-idx', idx);
         let rowHTML = `<td>${escapeHtml(r.name || '')}</td>` +
                       `<td>${escapeHtml(r.city || '')}</td>` +
-                      `<td>${r.review_count ?? ''}</td>` +
-                      `<td>${r.stars ?? ''}</td>`;
+                      `<td>${renderStars(r.stars)}</td>` +
+                      `<td>${r.review_count ?? ''}</td>`;
         if (data.trip_duration) rowHTML += `<td>${escapeHtml(r.trip_duration || '')}</td>`;
         if (data.detail) rowHTML += `<td>${escapeHtml(r.categories || '')}</td>`;
         tr.innerHTML = rowHTML;
@@ -191,6 +191,16 @@ function escapeHtml(s) {
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;');
+}
+
+function renderStars(stars) {
+    if (!stars) return '';
+    const full = Math.floor(stars);
+    const partial = stars - full;
+    let html = '<span class="star-full">★</span>'.repeat(full);
+    if (partial >= 0.5) html += '<span class="star-half">★</span>';
+    html += '<span class="star-empty">☆</span>'.repeat(5 - Math.ceil(stars));
+    return `<span class="star-rating">${html}</span>`;
 }
 
 function setupLocalityToggle() {
