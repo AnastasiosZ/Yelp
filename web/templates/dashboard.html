@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Yelp Recommender{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h1>Find your next spot</h1>
+    <p class="page-subtitle">Personalised business recommendations, ranked by how well they match your taste.</p>
+</header>
+
+<div class="dashboard-grid">
+    <!-- Left column: query form -->
+    <section class="card form-card">
+        <h2 class="form-heading">Query</h2>
+        <form id="recommend-form">
+            <label for="locality_mode">Locality mode</label>
+            <select id="locality_mode" name="locality_mode">
+                <option value="radial" selected>Radial (within N km)</option>
+                <option value="city">City</option>
+                <option value="state">State</option>
+            </select>
+
+            <div id="state-fields" class="locality-fields" style="display:none;">
+                <label for="state">State</label>
+                <input type="text" id="state" name="state" value="FL">
+            </div>
+
+            <div id="city-fields" class="locality-fields" style="display:none;">
+                <label for="city">City</label>
+                <input type="text" id="city" name="city" value="Tampa">
+            </div>
+
+            <div id="radial-fields" class="locality-fields">
+                <div class="latlng-row">
+                    <div class="latlng-field">
+                        <label for="latitude">Latitude</label>
+                        <input type="number" id="latitude" name="latitude" value="{{ user_lat }}" readonly>
+                    </div>
+                    <div class="latlng-field">
+                        <label for="longitude">Longitude</label>
+                        <input type="number" id="longitude" name="longitude" value="{{ user_lng }}" readonly>
+                    </div>
+                </div>
+                <p class="latlng-hint">Change your location on the <a href="/profile">Profile</a> page.</p>
+
+                <label for="radius" class="sub-label">Radius (km) <span id="radius-value">5</span></label>
+                <input type="range" id="radius" name="radius" min="0.5" max="20" step="0.5" value="5" class="slider">
+                <div class="slider-ends">
+                    <span>0.5</span>
+                    <span>20</span>
+                </div>
+            </div>
+
+            <label for="category-search">Categories</label>
+            <div id="category-picker" class="category-picker">
+                <div id="category-chips" class="category-chips"></div>
+                <input type="text" id="category-search" class="category-search"
+                       placeholder="Search categories…" autocomplete="off">
+                <ul id="category-suggestions" class="category-suggestions" hidden></ul>
+            </div>
+
+            <label for="scope" class="sub-label">Search scope</label>
+            <input type="range" id="scope" name="scope" min="0" max="10" step="1" value="5" class="slider">
+            <div class="slider-ends">
+                <span>Narrow</span>
+                <span>Broad</span>
+            </div>
+
+            <label for="day">Day</label>
+            <select id="day" name="day">
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+            </select>
+
+            <label for="time">Time</label>
+            <input type="time" id="time" name="time" value="21:00">
+
+            <label for="n" class="sub-label">Number of results <span id="n-value">5</span></label>
+            <input type="range" id="n" name="n" min="1" max="20" step="1" value="5" class="slider">
+            <div class="slider-ends">
+                <span>1</span>
+                <span>20</span>
+            </div>
+
+            <div class="checkboxes">
+                <label><input type="checkbox" id="currently_open" name="currently_open" checked> Currently open</label>
+                <label><input type="checkbox" id="recommend_reviewed" name="recommend_reviewed"> Include already-reviewed</label>
+                <label><input type="checkbox" id="trip_duration" name="trip_duration"> Compute trip duration</label>
+                <label><input type="checkbox" id="detail" name="detail"> Show categories</label>
+            </div>
+
+            <button type="submit" id="submit-btn">Get Recommendations</button>
+        </form>
+    </section>
+
+    <!-- Right column: map + results -->
+    <section class="results-pane">
+        <div id="map" style="height: 440px;"></div>
+
+        <div class="card results-card">
+            <div class="results-header-bar">
+                <h2>Results</h2>
+                <span class="results-hint muted small">Hover a row to preview · click to pin</span>
+            </div>
+            <div class="table-wrap">
+                <table id="results-table">
+                    <thead>
+                        <tr id="results-header"><th>Name</th><th>City</th><th>Reviews</th><th>Stars</th></tr>
+                    </thead>
+                    <tbody id="results-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    // Expose user location for main.js to initialize the map
+    window.USER_LAT = {{ user_lat }};
+    window.USER_LNG = {{ user_lng }};
+</script>
+{% endblock %}

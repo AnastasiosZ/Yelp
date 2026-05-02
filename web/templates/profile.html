@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Profile — Yelp Recommender{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h1>Your profile</h1>
+    <p class="page-subtitle">Manage your location and review history — these power every recommendation.</p>
+</header>
+
+<div class="profile-grid">
+    <section class="card profile-card">
+        <h2>{{ profile.name }}</h2>
+        <ul class="profile-stats">
+            <li><strong>User ID</strong> <code>{{ profile.user_id }}</code></li>
+            <li><strong>Review count</strong> <span>{{ profile.review_count }}</span></li>
+            <li><strong>Yelping since</strong> <span>{{ profile.yelping_since }}</span></li>
+            <li><strong>Average stars</strong> <span>{{ profile.average_stars }}</span></li>
+            <li><strong>Useful / Funny / Cool</strong> <span>{{ profile.useful }} / {{ profile.funny }} / {{ profile.cool }}</span></li>
+            <li><strong>Fans</strong> <span>{{ profile.fans }}</span></li>
+        </ul>
+    </section>
+
+    <section class="card" id="location-card">
+        <h2>Location</h2>
+        <p class="muted small" style="margin-top:-0.25rem; margin-bottom: 0.5rem;">
+            Used as the origin for radial queries and travel-duration lookups.
+        </p>
+        <label for="loc_lat">Latitude</label>
+        <input type="number" step="any" id="loc_lat" placeholder="{{ user_lat }}">
+        <label for="loc_lng">Longitude</label>
+        <input type="number" step="any" id="loc_lng" placeholder="{{ user_lng }}">
+        <button type="button" id="save-location-btn">Save Location</button>
+    </section>
+</div>
+
+<h2 class="section-title">Reviews</h2>
+
+<div id="reviews-list">
+    {% for r in reviews %}
+    <div class="card review-card" data-review-id="{{ r.review_id }}">
+        <div class="review-header">
+            <span><strong>Business</strong> <code>{{ r.business_id }}</code></span>
+            <span><strong>Date</strong> {{ r.date }}</span>
+        </div>
+        <label>Stars</label>
+        <input type="number" class="review-stars" min="0" max="5" step="0.5" value="{{ r.stars }}">
+        <label>Text</label>
+        <textarea class="review-text" rows="4">{{ r.text }}</textarea>
+        <div class="review-actions">
+            <button type="button" class="review-save-btn">Save</button>
+            <button type="button" class="review-delete-btn danger">Delete</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<h2 class="section-title">Add review</h2>
+
+<div class="card">
+    <form id="add-review-form">
+        <label for="new_business_id">Business ID</label>
+        <input type="text" id="new_business_id" placeholder="e.g. tUxFX3_H-XQxnM1aU5Uu0w" required>
+        <label for="new_stars">Stars (0–5, step 0.5)</label>
+        <input type="number" id="new_stars" min="0" max="5" step="0.5" value="4.0" required>
+        <label for="new_text">Review text</label>
+        <textarea id="new_text" rows="4" placeholder="What did you think?" required></textarea>
+        <button type="submit">Add Review</button>
+    </form>
+</div>
+{% endblock %}
