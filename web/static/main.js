@@ -45,7 +45,7 @@ function initDashboardMap() {
 }
 
 function clearBusinessMarkers() {
-    businessMarkers.forEach(m => leafletMap.removeLayer(m));
+    businessMarkers.forEach(({ marker }) => leafletMap.removeLayer(marker));
     businessMarkers = [];
 }
 
@@ -72,8 +72,8 @@ function blueMarker(lat, lng) {
 }
 
 function renderResults(data) {
-    // Clear business markers only (user marker persists)
     clearBusinessMarkers();
+    selectedBusinessIdx = null;
 
     const body = document.getElementById('results-body');
     const header = document.getElementById('results-header');
