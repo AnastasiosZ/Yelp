@@ -21,18 +21,22 @@ os.chdir(PROJECT_ROOT)
 from flask import Flask, render_template, request, jsonify
 
 # Heavy imports: Spark, User, Recommendation (constructs SparkSession on import)
-# W2V_MODEL is the shared, process-wide Word2Vec model loaded by recommender.py.
-from recommender import spark, User, Recommendation, W2V_MODEL  # noqa: E402
+# W2V_MODEL/W2V_VOCAB are the shared, process-wide Word2Vec assets loaded by recommender.py.
+from recommender import spark, User, Recommendation, get_recommendation, W2V_MODEL, W2V_VOCAB  # noqa: E402
 
 # Additional imports needed to reproduce recommend() logic
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from utility_functions import get_travel_duration_ors  # noqa: E402
+from utility_functions import get_travel_duration_ors, ATTRIBUTE_IMPORTANCE  # noqa: E402
 
 
-# Reuse the already-loaded Word2Vec model (no second load from disk).
-W2V_VOCAB = sorted(row['word'] for row in W2V_MODEL.getVectors().collect())
+# Sorted vocab list for the dashboard's category multi-select.
+W2V_VOCAB_SORTED = sorted(W2V_VOCAB)
+
+# Build the shared User instance once at startup so the first /recommend
+# request doesn't pay the cost of reading user files + joining with businesses.
+USER = User()
 
 
 # -------- App setup --------
@@ -124,37 +128,9 @@ def get_recommendations_with_geo(rec, n=5, currently_open=True, recommend_review
     Produce top-n recommendations as JSON-ready dicts for the web UI.
 
     Mirrors the ranking logic of ``Recommendation.recommend`` but emits a
-    list of plain dicts — including ``latitude``/``longitude`` so the
-    Leaflet map can place markers, and optionally ``categories`` and
-    ``trip_duration``. The candidate pool passes through
-    ``rec.business_vectors`` (the shared ``DefaultValueImputer → Imputer →
-    VectorAssembler → Normalizer`` pipeline) and is scored against the
-    pre-computed ``rec.user_bvector``.
-
-    Parameters
-    ----------
-    rec : Recommendation
-        A constructed ``Recommendation`` whose top-level filters (locality,
-        is_open, categories) have already been applied.
-    n : int, default 5
-        Number of results to return.
-    currently_open : bool, default True
-        If True, drop businesses closed at the query day/time.
-    recommend_reviewed : bool, default False
-        If False, exclude businesses the user has already reviewed.
-    trip_duration : bool, default False
-        If True and ``rec.locality_mode == 'radial'``, call OpenRouteService
-        for each result and add a formatted ``trip_duration`` string.
-    detail : bool, default False
-        If True, include a comma-joined ``categories`` field in each dict.
-
-    Returns
-    -------
-    list[dict]
-        Up to ``n`` result dicts with keys ``business_id``, ``name``,
-        ``address``, ``city``, ``review_count``, ``stars``, ``latitude``,
-        ``longitude`` (plus ``categories`` / ``trip_duration`` when
-        requested). Empty list if no candidates remain after filtering.
+    list of plain dicts including ``latitude``/``longitude`` for the
+    Leaflet map. Scores candidates via importance-weighted cosine against
+    the pre-computed ``rec.user_vec``.
     """
     businesses = rec.businesses
 
@@ -167,18 +143,13 @@ def get_recommendations_with_geo(rec, n=5, currently_open=True, recommend_review
     if businesses.limit(1).count() == 0:
         return []
 
-    # Fit the business pipeline on the candidate pool so the mode-imputed
-    # values reflect this query's demographic, then pull to pandas for scoring.
-    businesses_pd = rec.business_vectors(businesses).toPandas()
+    businesses_pd = businesses.toPandas()
 
-    # Cosine similarity = dot product (both already L2-normalized)
-    businesses_pd['cosine_similarity'] = businesses_pd['bvector_L2'].map(
-        lambda b: float(b.toArray() @ rec.user_bvector) # type:ignore
-    )
+    B = np.stack(businesses_pd['bvec'].apply(lambda v: v.toArray()).values)
+    businesses_pd['cosine_similarity'] = B @ np.diag(ATTRIBUTE_IMPORTANCE) @ rec.user_vec
 
-    # Quantile binning — cube-root rule (Rice-inspired) matches recommender.py
     try:
-        n_bins = max(int(np.power(len(businesses_pd), 1/3)), 1)
+        n_bins = max(int(np.power(len(businesses_pd), 1/2)), 1)
         businesses_pd['similarity_bin'] = pd.qcut(
             businesses_pd['cosine_similarity'], n_bins, duplicates='drop', labels=False
         )
@@ -189,7 +160,6 @@ def get_recommendations_with_geo(rec, n=5, currently_open=True, recommend_review
         ['similarity_bin', 'quality'], ascending=False
     ).head(n)
 
-    # Optional trip duration lookup (radial locality only)
     if trip_duration and rec.locality_mode == 'radial':
         user_lat, user_long = rec.query['locality'][1]
         businesses_pd['trip_duration_s'] = businesses_pd.apply(
@@ -202,7 +172,6 @@ def get_recommendations_with_geo(rec, n=5, currently_open=True, recommend_review
             lambda d: f'{int(d // 60)}m {int(d % 60)}s' if d else 'N/A'
         )
 
-    # Build result list
     results = []
     for _, row in businesses_pd.iterrows():
         item = {
@@ -271,7 +240,7 @@ def categories():
     flask.Response
         JSON of the form ``{"categories": [...]}``.
     """
-    return jsonify({'categories': W2V_VOCAB})
+    return jsonify({'categories': W2V_VOCAB_SORTED})
 
 
 @app.route('/recommend', methods=['POST'])
@@ -343,7 +312,7 @@ def recommend():
         trip_duration = bool(data.get('trip_duration', False))
         detail = bool(data.get('detail', False))
 
-        rec = Recommendation(query)
+        rec = get_recommendation(USER, query)
         results = get_recommendations_with_geo(
             rec,
             n=n,

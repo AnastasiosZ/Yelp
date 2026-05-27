@@ -77,8 +77,30 @@ class User():
 
 
 
+# Cache of past Recommendation instances
+RECOMMENDATIONS: dict = {}
+
+
+def _base_key(user: 'User', query: dict):
+    cats = tuple(sorted(query['categories']))
+    return (id(user), cats, int(query['scope']), tuple(query['locality']))
+
+
+def get_recommendation(user: 'User', query: dict) -> 'Recommendation':
+    # Get cached recommendation instance or create new one
+
+    key = _base_key(user, query)
+    rec = RECOMMENDATIONS.get(key)
+    if rec is None:
+        rec = Recommendation(user, query)
+        RECOMMENDATIONS[key] = rec
+    else:
+        rec.query['datetime'] = query.get('datetime', rec.query.get('datetime'))
+    return rec
+
+
 class Recommendation:
-    
+
     def __init__(self, user: User, query:dict) -> None:
 
         # Instead of inherit, access User instance
@@ -111,10 +133,16 @@ class Recommendation:
         user_businesses = self.user.user_businesses.filter(reduce(lambda a, b: a | b,
            [F.array_contains('categories',c) for c in matched_categories]))
 
-        # Construct user preference vector
-        self.user_vec = BUSINESS_PIPE.transform(user_businesses)\
-                        .agg(Summarizer.mean(F.col('bvec'), weightCol=F.col('user_stars')))\
-                        .take(1)[0][0].toArray()
+        # Construct user preference vector; fall back to unweighted mean of the
+        # candidate pool when the user has no reviews in these categories.
+        if user_businesses.limit(1).count() > 0:
+            self.user_vec = BUSINESS_PIPE.transform(user_businesses)\
+                            .agg(Summarizer.mean(F.col('bvec'), weightCol=F.col('user_stars')))\
+                            .take(1)[0][0].toArray()
+        else:
+            self.user_vec = self.businesses\
+                            .agg(Summarizer.mean(F.col('bvec')))\
+                            .take(1)[0][0].toArray()
 
 
 
@@ -240,24 +268,42 @@ class Recommendation:
 
 if __name__ == "__main__":
 
-    # Clear the console
     os.system('cls' if os.name == 'nt' else 'clear')
-
 
     USER_LAT, USER_LONG = 27.948375982565096, -82.4648864239378
 
-    query = {'locality':('radial', (USER_LAT, USER_LONG), 3), # 3km maximum distance 
-             'categories': ['Nightlife', 'Bars'], # query categories
-             'datetime':{'day':'Friday', # query day
-                         'time':21*60}, # query time in seconds
-             'scope': 2} # categories scope of the query
+    query = {'locality':('radial', (USER_LAT, USER_LONG), 3),
+             'categories': ['Nightlife', 'Bars'],
+             'datetime':{'day':'Friday', 'time':21*60},
+             'scope': 2}
 
     user = User()
-    rec = Recommendation(user, query)
 
+    print("=== First query (builds and caches) ===")
+    rec = get_recommendation(user, query)
     rec.recommend(10, trip_duration=False, detail=True)
 
+    print(f"\nCache size: {len(RECOMMENDATIONS)}")
 
+    print("\n=== Second query (same base, different datetime) ===")
+    query2 = query.copy()
+    query2['datetime'] = {'day': 'Saturday', 'time': 19*60}
+    rec2 = get_recommendation(user, query2)
+    print(f"Reused cached instance: {rec is rec2}")
+    rec2.recommend(5, trip_duration=False, detail=True)
+
+    print(f"\nCache size: {len(RECOMMENDATIONS)}")
+
+    print("\n=== Third query (different base, rebuilds) ===")
+    query3 = {'locality':('radial', (USER_LAT, USER_LONG), 5),
+              'categories': ['Restaurants'],
+              'datetime':{'day':'Friday', 'time':21*60},
+              'scope': 3}
+    rec3 = get_recommendation(user, query3)
+    print(f"New instance created: {rec is not rec3}")
+    rec3.recommend(5, trip_duration=False, detail=True)
+
+    print(f"\nFinal cache size: {len(RECOMMENDATIONS)}")
     print('Stopping SparkSession...')
-    spark.stop() # Stop Spark when done
+    spark.stop()
 
