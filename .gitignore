@@ -1,5 +1,6 @@
 .*
-*.md
+NOTES.md
+CLAUDE.md
 data/clean/
 data/yelp_academic_dataset_*
 models/
