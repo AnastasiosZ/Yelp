@@ -1,79 +1,71 @@
-from pyspark.sql.functions import col, sin, cos, asin, sqrt, radians
 from dotenv import load_dotenv
+from functools import reduce
 import os
 import requests
 import numpy as np
 
+import pyspark.sql.functions as F
 from pyspark.ml import Transformer
+from pyspark.ml.feature import Word2VecModel
+
 
 
 # --- Constants ---
 W2V_PATH = 'models/w2v_categories'
+DATA_PATH = 'data/clean/'
+USER_PATH = 'data/example/'
 
 
-# Business attribute columns used to build the profile vector.
-# All numeric by construction: the boolean attributes were cast to ByteType
-# as ``<name>_num`` columns in clean_data.ipynb, and the string attributes
-# (NoiseLevel, RestaurantsAttire) were pre-indexed with StringIndexer so
-# they can be fed directly to pyspark.ml.feature.Imputer (which only
-# accepts numeric types).
-attributes_cols = ['DogsAllowed_num','GoodForKids_num','OutdoorSeating_num',
-                   'RestaurantsGoodForGroups_num','WheelchairAccessible_num',
-                   'RestaurantsPriceRange2','NoiseLevel_indexed', 'RestaurantsAttire_indexed']
+ATTRIBUTES = {
+    'GoodForDancing':             {'default': 0, 'importance': 2},
+    'DogsAllowed':                {'default': 0, 'importance': 3},
+    'WheelchairAccessible':       {'default': 0, 'importance': 5},
+    'NoiseLevel':                 {'default': 1, 'importance': 4},
+    'RestaurantsAttire':          {'default': 0, 'importance': 3},
+    'ByAppointmentOnly':          {'default': 0, 'importance': 2},
+    'RestaurantsGoodForGroups':   {'default': 1, 'importance': 4},
+    'RestaurantsReservations':    {'default': 0, 'importance': 3},
+    'OutdoorSeating':             {'default': 0, 'importance': 3},
+    'GoodForKids':                {'default': 0, 'importance': 4},
+    'RestaurantsDelivery':        {'default': 0, 'importance': 2},
+    'RestaurantsTakeOut':         {'default': 1, 'importance': 3},
+    'RestaurantsPriceRange2':     {'default': 2, 'importance': 5},
+    'BusinessAcceptsCreditCards': {'default': 1, 'importance': 4},
+    'Ambience_romantic':          {'default': 0, 'importance': 3},
+    'Ambience_intimate':          {'default': 0, 'importance': 3},
+    'Ambience_touristy':          {'default': 0, 'importance': 2},
+    'Ambience_hipster':           {'default': 0, 'importance': 2},
+    'Ambience_divey':             {'default': 0, 'importance': 2},
+    'Ambience_classy':            {'default': 0, 'importance': 3},
+    'Ambience_trendy':            {'default': 0, 'importance': 3},
+    'Ambience_upscale':           {'default': 0, 'importance': 3},
+    'Ambience_casual':            {'default': 0, 'importance': 3}
+}
+
+ATTRIBUTE_IMPORTANCE = [attr['importance'] for attr in ATTRIBUTES.values()]
+
+DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 
 
-
-from pyspark.ml import Transformer
-from pyspark.sql import functions as F
-
-class DefaultValueImputer(Transformer):
-    """
-    Custom Spark ML ``Transformer`` that plugs the ``Imputer`` gap when a
-    column is entirely NULL for the current DataFrame.
-
-    ``pyspark.ml.feature.Imputer(strategy='mode')`` cannot compute a mode
-    for a column with zero non-null values — it raises at fit time. This
-    transformer runs first in ``business_pipe``: it counts non-nulls for
-    every ``attributes_cols`` column in a single pass, and for any column
-    whose count is zero, fills it with a global default (the dataset-wide
-    mode pre-computed on the full business table in EDA). After this
-    stage, every column has at least one non-null value and the
-    downstream ``Imputer`` can safely fit its per-column mode on the
-    remaining (non-default) rows.
-
-    The dataset-wide modes are aligned by position with ``attributes_cols``.
-    """
-
-    def __init__(self):
-
-        default_values = [0,1,0,1,1,2,0,0]
-        self.fill_dict = dict(zip(attributes_cols, default_values))
+class MeanImputeFallback(Transformer):
 
     def _transform(self, df): # type:ignore
-        """
-        Fill all-NULL attribute columns with their dataset-wide defaults.
 
-        Detects all-null columns in a single aggregation pass (one
-        ``F.count`` per column, evaluated together), then narrows the
-        ``fillna`` call to just those columns.
+        counts = df.select([F.count(c).alias(c) for c in list(ATTRIBUTES.keys())]).first().asDict()
+        means = df.select([F.mean(c).alias(c) for c in list(ATTRIBUTES.keys())]).first().asDict()
 
-        Parameters
-        ----------
-        df : pyspark.sql.DataFrame
-            Business DataFrame containing ``attributes_cols``.
+        fill_dict = {
+            c: (ATTRIBUTES[c]['default'] if counts[c] == 0 else means[c])
+            for c in list(ATTRIBUTES.keys())
+        }
 
-        Returns
-        -------
-        pyspark.sql.DataFrame
-            Same schema as ``df`` with all-null attribute columns
-            defaulted.
-        """
+        return reduce(lambda acc, item: acc.withColumn(
+                          item[0], F.when(F.col(item[0]).isNull(), F.lit(item[1])).otherwise(F.col(item[0]))),
+                      fill_dict.items(), df)
 
-        counts = df.select([F.count(c).alias(c) for c in self.fill_dict]).first().asDict()
 
-        null_only_dict = {c: self.fill_dict[c] for c,v in counts.items() if v == 0}
 
-        return df.fillna(null_only_dict)
+
 
 
 def haversine_spark(lat1_col, lon1_col, lat2_col, lon2_col):
@@ -99,11 +91,11 @@ def haversine_spark(lat1_col, lon1_col, lat2_col, lon2_col):
     """
     R = 6371.0
 
-    dlat = radians(lat2_col - lat1_col)
-    dlon = radians(lon2_col - lon1_col)
+    dlat = F.radians(lat2_col - lat1_col)
+    dlon = F.radians(lon2_col - lon1_col)
 
-    a = sin(dlat/2)**2 + cos(radians(lat1_col)) * cos(radians(lat2_col)) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a))
+    a = F.sin(dlat/2)**2 + F.cos(F.radians(lat1_col)) * F.cos(F.radians(lat2_col)) * F.sin(dlon/2)**2
+    c = 2 * F.asin(F.sqrt(a))
 
     return R * c
 
@@ -150,46 +142,27 @@ def get_travel_duration_ors(origin_lat, origin_lng, dest_lat, dest_lng):
     return response.json()['features'][0]['properties']['summary']['duration']
 
 
-def similar_categories_w2v(category_filter, topn=5, model=None):
-    """
-    Find categories semantically similar to the input category/categories
-    using a trained Word2Vec model over the business category vocabulary.
 
-    Parameters:
-        category_filter (str or list of str): single category or list of
-            categories to look up in the Word2Vec vocabulary.
-        topn (int): number of similar categories to retrieve per input
-            category (default 5).
-        model (Word2VecModel, optional): a pre-loaded Word2VecModel. If
-            None, the model is loaded from W2V_PATH.
 
-    Returns:
-        list of str: the input category/categories merged with their
-            top-n most similar categories from the Word2Vec vocabulary.
+def similar_categories_w2v(model, vocab, category_filter: str | list[str] , topn=5):
 
-    Raises:
-        Exception: if a category is not present in the Word2Vec vocabulary.
-    """
-    from pyspark.ml.feature import Word2VecModel
-
-    if topn==0: return category_filter
-
-    if isinstance(category_filter, list):
-        if model is None:
-            model = Word2VecModel.load(W2V_PATH)
+    # If given a list of categories, self-call each category
+    if isinstance(category_filter,list):
+        
         results = set()
         for cat in category_filter:
-            result = similar_categories_w2v(cat, topn, model=model)
+            result = similar_categories_w2v(model, vocab, cat, topn)
             if result: results.update(result)
         return list(results)
-
-    if model is None:
-        model = Word2VecModel.load(W2V_PATH)
-    vocab = set(row['word'] for row in model.getVectors().collect())
-
+    
     if category_filter not in vocab:
         raise Exception(f"Category '{category_filter}' does not exist in the category vocabulary!")
 
-    synonyms = model.findSynonyms(category_filter, topn)
-    similar = [row['word'] for row in synonyms.collect()]
-    return np.union1d(similar, [category_filter]).tolist()
+    if topn==0: return [category_filter]
+
+    synonyms = model.findSynonymsArray(category_filter, topn)
+    similar = set([word[0] for word in synonyms])
+    similar.add(category_filter)
+
+    return list(similar)
+
